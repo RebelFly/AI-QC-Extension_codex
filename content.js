@@ -151,6 +151,7 @@ const SELECTORS = {
   senderName: "span.font-medium",
   messageText: ".whitespace-pre-wrap",
   messageImage: "img.rc-image-img",
+  messageTime: "span[title]",
   thumbsUpIcon: "svg.lucide-thumbs-up",
   thumbsDownIcon: "svg.lucide-thumbs-down",
   qcDialog: 'div[role="dialog"]',
@@ -185,7 +186,10 @@ panel.innerHTML = `
   
   <button id="ai-config-btn" style="width: 100%; padding: 6px 0; background: #475569; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold; margin-bottom: 5px;">⚙️ 配置 Prompt</button>
   <button id="ai-debug-btn" style="width: 100%; padding: 6px 0; background: #8b5cf6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold; margin-bottom: 5px;">🧪 单步调试(含报告)</button>
-  <button id="ai-start-btn" style="width: 100%; padding: 6px 0; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold; margin-bottom: 5px;">▶️ 全自动打标</button>
+  <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+    <button id="ai-start-btn" style="flex: 1; min-width: 0; padding: 6px 0; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold;">▶️ 全自动打标</button>
+    <button id="ai-concurrency-btn" style="width: 34px; padding: 6px 0; background: #0f172a; color: #bfdbfe; border: 1px solid #3b82f6; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold;" title="AI 并发线程数">x2</button>
+  </div>
   <button id="ai-stop-btn" style="width: 100%; padding: 6px 0; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold;" disabled>⏹️ 紧急停止</button>
 `;
 document.documentElement.appendChild(panel);
@@ -207,43 +211,143 @@ document.documentElement.appendChild(modalOverlay);
 const dragHeader = panel.querySelector("#ai-drag-header");
 const statusEl = panel.querySelector("#ai-status");
 const configBtn = panel.querySelector("#ai-config-btn");
+const concurrencyBtn = panel.querySelector("#ai-concurrency-btn");
 const debugBtn = panel.querySelector("#ai-debug-btn");
 const startBtn = panel.querySelector("#ai-start-btn");
 const stopBtn = panel.querySelector("#ai-stop-btn");
 
+const LONG_PRESS_DRAG_DELAY = 300;
+const DRAG_VISIBLE_EDGE = 48;
+let longPressDragTimer = null;
+
+function clampDragPosition(left, top, element) {
+  const rect = element.getBoundingClientRect();
+  const maxLeft = window.innerWidth - DRAG_VISIBLE_EDGE;
+  const maxTop = window.innerHeight - DRAG_VISIBLE_EDGE;
+  const minLeft = DRAG_VISIBLE_EDGE - rect.width;
+  const minTop = DRAG_VISIBLE_EDGE - rect.height;
+  return {
+    left: Math.min(Math.max(left, minLeft), maxLeft),
+    top: Math.min(Math.max(top, minTop), maxTop)
+  };
+}
+
+function isBlockedDragTarget(target) {
+  if (!target || !target.closest) return true;
+  return !!target.closest('button, input, textarea, select, a, pre, [contenteditable="true"], [role="button"]');
+}
+
+function clearLongPressDrag() {
+  if (longPressDragTimer) {
+    clearTimeout(longPressDragTimer.id);
+    longPressDragTimer = null;
+  }
+  document.removeEventListener("mouseup", clearLongPressDrag);
+}
+
+function setupLongPressDrag(container, ignoredSelector, beginDrag) {
+  container.addEventListener("mousedown", (e) => {
+    if (!e.target.closest) return;
+    if (e.button !== 0 || e.target.closest(ignoredSelector) || isBlockedDragTarget(e.target)) return;
+    clearLongPressDrag();
+    const startEvent = e;
+    const timerId = setTimeout(() => {
+      longPressDragTimer = null;
+      beginDrag(startEvent);
+    }, LONG_PRESS_DRAG_DELAY);
+    longPressDragTimer = {
+      id: timerId,
+      startX: e.clientX,
+      startY: e.clientY
+    };
+    document.addEventListener("mouseup", clearLongPressDrag);
+  });
+}
+
 let isDragging = false, startX, startY, initialLeft, initialTop;
-dragHeader.addEventListener("mousedown", (e) => {
+function beginPanelDrag(e) {
+  clearLongPressDrag();
   isDragging = true; startX = e.clientX; startY = e.clientY;
   const rect = panel.getBoundingClientRect();
   initialLeft = rect.left; initialTop = rect.top;
   panel.style.right = "auto"; panel.style.bottom = "auto";
+  panel.style.cursor = "grabbing";
   dragHeader.style.cursor = "grabbing";
-});
+}
+dragHeader.addEventListener("mousedown", beginPanelDrag);
+setupLongPressDrag(panel, "#ai-drag-header", beginPanelDrag);
 
 let modalDragging = false, mStartX, mStartY, mInitialLeft, mInitialTop;
+function beginModalDrag(e) {
+  clearLongPressDrag();
+  modalDragging = true;
+  mStartX = e.clientX; mStartY = e.clientY;
+  const rect = modalOverlay.getBoundingClientRect();
+  mInitialLeft = rect.left; mInitialTop = rect.top;
+  modalOverlay.style.cursor = "grabbing";
+  const header = modalOverlay.querySelector(SELECTORS.modalHandle);
+  if (header) header.style.cursor = "grabbing";
+}
+setupLongPressDrag(modalOverlay, SELECTORS.modalHandle, beginModalDrag);
 
 document.addEventListener("mousemove", (e) => {
   if (isDragging) {
-    panel.style.left = (initialLeft + (e.clientX - startX)) + "px";
-    panel.style.top = (initialTop + (e.clientY - startY)) + "px";
+    const nextPosition = clampDragPosition(initialLeft + (e.clientX - startX), initialTop + (e.clientY - startY), panel);
+    panel.style.left = nextPosition.left + "px";
+    panel.style.top = nextPosition.top + "px";
   }
   if (modalDragging) {
-    modalOverlay.style.left = (mInitialLeft + (e.clientX - mStartX)) + "px";
-    modalOverlay.style.top = (mInitialTop + (e.clientY - mStartY)) + "px";
+    const nextPosition = clampDragPosition(mInitialLeft + (e.clientX - mStartX), mInitialTop + (e.clientY - mStartY), modalOverlay);
+    modalOverlay.style.left = nextPosition.left + "px";
+    modalOverlay.style.top = nextPosition.top + "px";
   }
 });
 document.addEventListener("mouseup", () => { 
-  if (isDragging) { isDragging = false; dragHeader.style.cursor = "move"; } 
+  clearLongPressDrag();
+  if (isDragging) { isDragging = false; panel.style.cursor = ""; dragHeader.style.cursor = "move"; } 
   if (modalDragging) {
     modalDragging = false; 
+    modalOverlay.style.cursor = "";
     const mHeader = modalOverlay.querySelector(SELECTORS.modalHandle);
     if (mHeader) mHeader.style.cursor = "move";
   }
 });
 
 let isRunning = false;
+const AI_CONCURRENCY_OPTIONS = [1, 2, 3, 5];
+let aiConcurrency = Number(localStorage.getItem("qc_ai_concurrency") || 2);
+if (!AI_CONCURRENCY_OPTIONS.includes(aiConcurrency)) aiConcurrency = 2;
+function refreshConcurrencyButton() {
+  concurrencyBtn.innerText = `x${aiConcurrency}`;
+  concurrencyBtn.title = `AI 并发线程数: ${aiConcurrency}`;
+}
+refreshConcurrencyButton();
+concurrencyBtn.addEventListener("click", () => {
+  const currentIndex = AI_CONCURRENCY_OPTIONS.indexOf(aiConcurrency);
+  aiConcurrency = AI_CONCURRENCY_OPTIONS[(currentIndex + 1) % AI_CONCURRENCY_OPTIONS.length];
+  localStorage.setItem("qc_ai_concurrency", String(aiConcurrency));
+  refreshConcurrencyButton();
+  updateStatus(`并发数: ${aiConcurrency} 线程`, "#3b82f6");
+});
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 function updateStatus(text, color = "#10b981") { statusEl.innerText = text; statusEl.style.color = color; }
+
+async function runWithConcurrency(items, limit, worker) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 1, items.length));
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function runner() {
+    while (isRunning && nextIndex < items.length) {
+      const currentIndex = nextIndex++;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: safeLimit }, () => runner()));
+  return results;
+}
 
 function simulateClick(el) {
   if (!el) return;
@@ -319,12 +423,8 @@ function openModal(htmlContent) {
   const header = modalOverlay.querySelector(SELECTORS.modalHandle);
   if (header) {
     header.onmousedown = (e) => {
-      if (e.target.tagName === 'SELECT' || e.target.tagName === 'BUTTON') return;
-      modalDragging = true;
-      mStartX = e.clientX; mStartY = e.clientY;
-      const rect = modalOverlay.getBoundingClientRect();
-      mInitialLeft = rect.left; mInitialTop = rect.top;
-      header.style.cursor = "grabbing";
+      if (isBlockedDragTarget(e.target)) return;
+      beginModalDrag(e);
     };
   }
 }
@@ -546,14 +646,14 @@ ${feedback}
 // ==========================================
 debugBtn.addEventListener("click", async () => {
     isRunning = true; updateStatus("🧪 调试中...", "#8b5cf6");
-    debugBtn.disabled = true; startBtn.disabled = true;
+    debugBtn.disabled = true; startBtn.disabled = true; concurrencyBtn.disabled = true;
     try { await processCurrentCustomer(true); updateStatus("✅ 调试完成！", "#10b981"); } 
     catch (err) { updateStatus(`❌ 终止: ${err.message}`, "#ef4444"); }
-    isRunning = false; debugBtn.disabled = false; startBtn.disabled = false;
+    isRunning = false; debugBtn.disabled = false; startBtn.disabled = false; concurrencyBtn.disabled = false;
 });
 
 startBtn.addEventListener("click", async () => {
-  isRunning = true; startBtn.disabled = true; debugBtn.disabled = true; startBtn.style.background = "#475569"; stopBtn.disabled = false;
+  isRunning = true; startBtn.disabled = true; debugBtn.disabled = true; concurrencyBtn.disabled = true; startBtn.style.background = "#475569"; stopBtn.disabled = false;
   updateStatus("🚀 自动运行中...", "#f59e0b");
   while (isRunning) {
     try {
@@ -567,7 +667,7 @@ startBtn.addEventListener("click", async () => {
       updateStatus(`❌ 跳过异常`, "#ef4444"); await moveToNextCustomer(); await sleep(3500);
     }
   }
-  isRunning = false; startBtn.disabled = false; debugBtn.disabled = false; startBtn.style.background = "#3b82f6"; stopBtn.disabled = true;
+  isRunning = false; startBtn.disabled = false; debugBtn.disabled = false; concurrencyBtn.disabled = false; startBtn.style.background = "#3b82f6"; stopBtn.disabled = true;
 });
 
 stopBtn.addEventListener("click", () => { isRunning = false; updateStatus("🛑 正在停止...", "#ef4444"); });
@@ -619,6 +719,27 @@ function getSenderName(row) {
   return nameNode ? nameNode.innerText.trim() : "未知";
 }
 
+function getMessageTime(row) {
+  const timeReg = /\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/;
+  const titleNode = Array.from(row.querySelectorAll(SELECTORS.messageTime))
+    .find(node => timeReg.test(node.getAttribute("title") || ""));
+  if (titleNode) return (titleNode.getAttribute("title").match(timeReg) || [])[0] || "";
+
+  const textNode = Array.from(row.querySelectorAll(SELECTORS.messageTime))
+    .find(node => timeReg.test(node.innerText || node.textContent || ""));
+  return textNode ? ((textNode.innerText || textNode.textContent || "").match(timeReg) || [])[0] || "" : "";
+}
+
+function getMessageDate(row) {
+  const messageTime = getMessageTime(row);
+  return messageTime ? messageTime.slice(0, 10) : "";
+}
+
+function formatMessagePrefix(row) {
+  const messageTime = getMessageTime(row);
+  return messageTime ? `[${messageTime}] ` : "";
+}
+
 function buildQcContext(targetMessageRow) {
   let targetText = "";
   targetMessageRow.querySelectorAll(SELECTORS.messageText).forEach(span => {
@@ -628,33 +749,38 @@ function buildQcContext(targetMessageRow) {
   const aiPayloadContent = [{ type: "text", text: "请基于以下截断的上下文进行质检：\n" }];
   let debugText = "";
   const allMessageRows = document.querySelectorAll(SELECTORS.messageRows);
+  const targetMessageDate = getMessageDate(targetMessageRow);
 
   for (let row of allMessageRows) {
     const isCustomer = row.classList.contains(SELECTORS.customerRow.slice(1));
     const senderName = getSenderName(row);
     const textContent = getMessageText(row);
+    const messageDate = getMessageDate(row);
+    const messagePrefix = formatMessagePrefix(row);
 
     if (!textContent) continue;
 
     if (row === targetMessageRow) {
-      const line = `\n👇 --- 以下是本次需要你评估的 AI 生成内容 --- 👇\n【当前需质检的AI生成草稿 - ${senderName}】: ${textContent}\n`;
+      const line = `\n👇 --- 以下是本次需要你评估的 AI 生成内容 --- 👇\n${messagePrefix}【当前需质检的AI生成草稿 - ${senderName}】: ${textContent}\n`;
       aiPayloadContent.push({ type: "text", text: line });
       debugText += line;
       break;
     }
 
+    if (targetMessageDate && messageDate && messageDate !== targetMessageDate) continue;
+
     if (isCustomer) {
-      const line = `【顾客(同一人)】: ${textContent}\n`;
+      const line = `${messagePrefix}【顾客(同一人)】: ${textContent}\n`;
       aiPayloadContent.push({ type: "text", text: line });
       debugText += line;
     } else if (senderName.includes("系统")) {
-      const line = `【系统底层规则触发 (顾客不可见)】: ${textContent}\n`;
+      const line = `${messagePrefix}【系统底层规则触发 (顾客不可见)】: ${textContent}\n`;
       aiPayloadContent.push({ type: "text", text: line });
       debugText += line;
     } else if (row.querySelector(SELECTORS.thumbsUpIcon)) {
       continue;
     } else {
-      const line = `【发给顾客的外露回复 - ${senderName}】: ${textContent}\n`;
+      const line = `${messagePrefix}【发给顾客的外露回复 - ${senderName}】: ${textContent}\n`;
       aiPayloadContent.push({ type: "text", text: line });
       debugText += line;
     }
@@ -764,35 +890,52 @@ async function processCurrentCustomer(isDebug) {
   }
 
   const systemPrompt = getCurrentSystemPrompt();
+  const tasks = botRows.map((targetMessageRow, i) => {
+    const progressInfo = `(${i + 1}/${botRows.length})`;
+    const { aiPayloadContent, debugText, targetText } = buildQcContext(targetMessageRow);
+    return { targetMessageRow, progressInfo, aiPayloadContent, debugText, targetText };
+  });
 
-  for (let i = 0; i < botRows.length; i++) {
+  if (isDebug) {
+    for (let i = 0; i < tasks.length; i++) {
+      if (!isRunning) break;
+
+      const task = tasks[i];
+      updateStatus(`🧠 质检进度: ${task.progressInfo}`);
+
+      await showStep1Modal(task.progressInfo, task.targetText, task.debugText);
+
+      updateStatus(`🧠 呼叫大模型 ${task.progressInfo}`);
+      let aiResult;
+      try {
+        aiResult = await callAIForQC(systemPrompt, task.aiPayloadContent);
+      } catch (err) {
+        alert("报错：\n" + err.message);
+        throw err;
+      }
+
+      if (!isRunning) return;
+
+      await showStep2Modal(task.progressInfo, task.debugText, aiResult);
+      await applyQCResult(task.targetMessageRow, aiResult, task.progressInfo, true);
+    }
+    return;
+  }
+
+  const effectiveConcurrency = Math.min(aiConcurrency, tasks.length);
+  updateStatus(`🧠 并发质检中: ${effectiveConcurrency}线程`, "#3b82f6");
+  const analyzedTasks = await runWithConcurrency(tasks, effectiveConcurrency, async (task) => {
+    updateStatus(`🧠 呼叫大模型 ${task.progressInfo}`);
+    const aiResult = await callAIForQC(systemPrompt, task.aiPayloadContent);
+    return { ...task, aiResult };
+  });
+
+  for (let i = 0; i < analyzedTasks.length; i++) {
     if (!isRunning) break;
 
-    const targetMessageRow = botRows[i];
-    const progressInfo = `(${i + 1}/${botRows.length})`;
-    updateStatus(`🧠 质检进度: ${progressInfo}`);
-
-    const { aiPayloadContent, debugText, targetText } = buildQcContext(targetMessageRow);
-
-    if (isDebug) {
-      await showStep1Modal(progressInfo, targetText, debugText);
-    }
-
-    updateStatus(`🧠 呼叫大模型 ${progressInfo}`);
-    let aiResult;
-    try {
-      aiResult = await callAIForQC(systemPrompt, aiPayloadContent);
-    } catch (err) {
-      if (isDebug) alert("报错：\n" + err.message);
-      throw err;
-    }
-
-    if (!isRunning) return;
-
-    if (isDebug) {
-      await showStep2Modal(progressInfo, debugText, aiResult);
-    }
-
-    await applyQCResult(targetMessageRow, aiResult, progressInfo, isDebug);
+    const item = analyzedTasks[i];
+    if (!item) continue;
+    updateStatus(`🖱️ 正在写入 ${item.progressInfo}`);
+    await applyQCResult(item.targetMessageRow, item.aiResult, item.progressInfo, false);
   }
 }
