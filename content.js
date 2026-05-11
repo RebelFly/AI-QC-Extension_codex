@@ -333,6 +333,17 @@ concurrencyBtn.addEventListener("click", () => {
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 function updateStatus(text, color = "#10b981") { statusEl.innerText = text; statusEl.style.color = color; }
 
+function setPanelBusy(isBusy) {
+  configBtn.disabled = isBusy;
+  debugBtn.disabled = isBusy;
+  startBtn.disabled = isBusy;
+  concurrencyBtn.disabled = isBusy;
+  configBtn.style.opacity = isBusy ? "0.55" : "";
+  debugBtn.style.opacity = isBusy ? "0.55" : "";
+  startBtn.style.opacity = isBusy ? "0.55" : "";
+  concurrencyBtn.style.opacity = isBusy ? "0.55" : "";
+}
+
 async function runWithConcurrency(items, limit, worker) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 1, items.length));
   const results = new Array(items.length);
@@ -432,6 +443,11 @@ function closeModal() { modalOverlay.style.display = "none"; modalOverlay.innerH
 
 // --- Prompt 配置面板 ---
 configBtn.addEventListener("click", () => {
+  if (isRunning) {
+    updateStatus("单步测试/自动运行中，先完成当前流程", "#f59e0b");
+    return;
+  }
+
   const archives = readPromptArchives();
   const currentArchive = getActivePromptArchive();
   const optionHtml = archives.map(item => `
@@ -646,14 +662,14 @@ ${feedback}
 // ==========================================
 debugBtn.addEventListener("click", async () => {
     isRunning = true; updateStatus("🧪 调试中...", "#8b5cf6");
-    debugBtn.disabled = true; startBtn.disabled = true; concurrencyBtn.disabled = true;
+    setPanelBusy(true);
     try { await processCurrentCustomer(true); updateStatus("✅ 调试完成！", "#10b981"); } 
     catch (err) { updateStatus(`❌ 终止: ${err.message}`, "#ef4444"); }
-    isRunning = false; debugBtn.disabled = false; startBtn.disabled = false; concurrencyBtn.disabled = false;
+    isRunning = false; setPanelBusy(false);
 });
 
 startBtn.addEventListener("click", async () => {
-  isRunning = true; startBtn.disabled = true; debugBtn.disabled = true; concurrencyBtn.disabled = true; startBtn.style.background = "#475569"; stopBtn.disabled = false;
+  isRunning = true; setPanelBusy(true); startBtn.style.background = "#475569"; stopBtn.disabled = false;
   updateStatus("🚀 自动运行中...", "#f59e0b");
   while (isRunning) {
     try {
@@ -667,7 +683,7 @@ startBtn.addEventListener("click", async () => {
       updateStatus(`❌ 跳过异常`, "#ef4444"); await moveToNextCustomer(); await sleep(3500);
     }
   }
-  isRunning = false; startBtn.disabled = false; debugBtn.disabled = false; concurrencyBtn.disabled = false; startBtn.style.background = "#3b82f6"; stopBtn.disabled = true;
+  isRunning = false; setPanelBusy(false); startBtn.style.background = "#3b82f6"; stopBtn.disabled = true;
 });
 
 stopBtn.addEventListener("click", () => { isRunning = false; updateStatus("🛑 正在停止...", "#ef4444"); });
