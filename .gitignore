@@ -1,0 +1,21 @@
+.DS_Store
+Thumbs.db
+
+# Local editor and OS metadata
+.vscode/
+.idea/
+*.swp
+
+# Temporary files
+*.log
+tmp/
+temp/
+
+# Packaged browser extension artifacts
+*.zip
+*.crx
+*.pem
+
+# Local environment files
+.env
+.env.*
