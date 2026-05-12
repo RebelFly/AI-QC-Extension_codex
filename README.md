@@ -1,4 +1,4 @@
-# 未来对话 - AI 智能质检辅助
+# AI 智能质检辅助
 
 一个基于 Chrome Extension Manifest V3 的质检辅助插件，用于在网页对话场景中提取聊天上下文，调用兼容 OpenAI Chat Completions 格式的多模态大模型，并辅助填写质检结果。
 

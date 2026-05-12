@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "未来对话 - AI 智能质检辅助",
+  "name": "AI 智能质检辅助",
   "version": "1.0",
   "description": "一键提取图文聊天记录，调用多模态大模型，全自动填入质检表单。",
   "permissions": ["storage"],
