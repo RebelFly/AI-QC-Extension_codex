@@ -151,6 +151,7 @@ const SELECTORS = {
   senderName: "span.font-medium",
   messageText: ".whitespace-pre-wrap",
   messageImage: "img.rc-image-img",
+  messageCardBody: ".rounded-lg .p-4.text-sm.relative",
   messageTime: "span[title]",
   thumbsUpIcon: "svg.lucide-thumbs-up",
   thumbsDownIcon: "svg.lucide-thumbs-down",
@@ -719,11 +720,23 @@ function getPendingBotRows() {
   });
 }
 
+function getCleanCardBodyText(cardBody) {
+  const clone = cardBody.cloneNode(true);
+  clone.querySelectorAll(".absolute, svg, button").forEach(node => node.remove());
+  return (clone.innerText || clone.textContent || "").replace(/\s+/g, " ").trim();
+}
+
 function getMessageText(row) {
   let textContent = "";
   row.querySelectorAll(SELECTORS.messageText).forEach(span => {
     if (span.innerText) textContent += span.innerText.trim() + " ";
   });
+  if (!textContent.trim()) {
+    row.querySelectorAll(SELECTORS.messageCardBody).forEach(cardBody => {
+      const cardText = getCleanCardBodyText(cardBody);
+      if (cardText) textContent += cardText + " ";
+    });
+  }
   row.querySelectorAll(SELECTORS.messageImage).forEach(img => {
     if (img.src) textContent += `\n[发送了图片: ${img.src}]\n`;
   });
@@ -756,11 +769,15 @@ function formatMessagePrefix(row) {
   return messageTime ? `[${messageTime}] ` : "";
 }
 
+function isInternalActionCard(row) {
+  const cardTitle = Array.from(row.querySelectorAll(".rounded-lg span.font-medium"))
+    .map(node => node.innerText.trim())
+    .find(text => text);
+  return row.querySelector(".border-dashed") || cardTitle === "转人工服务";
+}
+
 function buildQcContext(targetMessageRow) {
-  let targetText = "";
-  targetMessageRow.querySelectorAll(SELECTORS.messageText).forEach(span => {
-    targetText += span.innerText.trim();
-  });
+  const targetText = getMessageText(targetMessageRow);
 
   const aiPayloadContent = [{ type: "text", text: "请基于以下截断的上下文进行质检：\n" }];
   let debugText = "";
@@ -777,7 +794,13 @@ function buildQcContext(targetMessageRow) {
     if (!textContent) continue;
 
     if (row === targetMessageRow) {
-      const line = `\n👇 --- 以下是本次需要你评估的 AI 生成内容 --- 👇\n${messagePrefix}【当前需质检的AI生成草稿 - ${senderName}】: ${textContent}\n`;
+      const targetLabel = isInternalActionCard(row)
+        ? `【当前需质检的AI内部判断/动作卡片 - ${senderName}】`
+        : `【当前需质检的AI生成草稿 - ${senderName}】`;
+      const targetNote = isInternalActionCard(row)
+        ? "\n说明：这是一张 AI 内部判断/动作卡片，顾客不可见，不是客服要发给顾客的话术；请评估这个内部判断或动作本身是否合理。\n"
+        : "";
+      const line = `\n👇 --- 以下是本次需要你评估的 AI 生成内容 --- 👇\n${messagePrefix}${targetLabel}: ${textContent}${targetNote}\n`;
       aiPayloadContent.push({ type: "text", text: line });
       debugText += line;
       break;
@@ -791,6 +814,10 @@ function buildQcContext(targetMessageRow) {
       debugText += line;
     } else if (senderName.includes("系统")) {
       const line = `${messagePrefix}【系统底层规则触发 (顾客不可见)】: ${textContent}\n`;
+      aiPayloadContent.push({ type: "text", text: line });
+      debugText += line;
+    } else if (isInternalActionCard(row)) {
+      const line = `${messagePrefix}【AI内部判断/动作卡片 (顾客不可见) - ${senderName}】: ${textContent}\n`;
       aiPayloadContent.push({ type: "text", text: line });
       debugText += line;
     } else if (row.querySelector(SELECTORS.thumbsUpIcon)) {
