@@ -345,22 +345,6 @@ function setPanelBusy(isBusy) {
   concurrencyBtn.style.opacity = isBusy ? "0.55" : "";
 }
 
-async function runWithConcurrency(items, limit, worker) {
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 1, items.length));
-  const results = new Array(items.length);
-  let nextIndex = 0;
-
-  async function runner() {
-    while (isRunning && nextIndex < items.length) {
-      const currentIndex = nextIndex++;
-      results[currentIndex] = await worker(items[currentIndex], currentIndex);
-    }
-  }
-
-  await Promise.all(Array.from({ length: safeLimit }, () => runner()));
-  return results;
-}
-
 function simulateClick(el) {
   if (!el) return;
   el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
@@ -966,19 +950,22 @@ async function processCurrentCustomer(isDebug) {
   }
 
   const effectiveConcurrency = Math.min(aiConcurrency, tasks.length);
-  updateStatus(`🧠 并发质检中: ${effectiveConcurrency}线程`, "#3b82f6");
-  const analyzedTasks = await runWithConcurrency(tasks, effectiveConcurrency, async (task) => {
-    updateStatus(`🧠 呼叫大模型 ${task.progressInfo}`);
-    const aiResult = await callAIForQC(systemPrompt, task.aiPayloadContent);
-    return { ...task, aiResult };
-  });
+  for (let batchStart = 0; batchStart < tasks.length && isRunning; batchStart += effectiveConcurrency) {
+    const batch = tasks.slice(batchStart, batchStart + effectiveConcurrency);
+    const batchEnd = batchStart + batch.length;
+    updateStatus(`🧠 并发质检 ${batchStart + 1}-${batchEnd}/${tasks.length}`, "#3b82f6");
 
-  for (let i = 0; i < analyzedTasks.length; i++) {
-    if (!isRunning) break;
+    const analyzedBatch = await Promise.all(batch.map(async (task) => {
+      const aiResult = await callAIForQC(systemPrompt, task.aiPayloadContent);
+      return { ...task, aiResult };
+    }));
 
-    const item = analyzedTasks[i];
-    if (!item) continue;
-    updateStatus(`🖱️ 正在写入 ${item.progressInfo}`);
-    await applyQCResult(item.targetMessageRow, item.aiResult, item.progressInfo, false);
+    for (let i = 0; i < analyzedBatch.length; i++) {
+      if (!isRunning) break;
+
+      const item = analyzedBatch[i];
+      updateStatus(`🖱️ 正在写入 ${item.progressInfo}`);
+      await applyQCResult(item.targetMessageRow, item.aiResult, item.progressInfo, false);
+    }
   }
 }
